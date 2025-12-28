@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  llama:
+    image: ghcr.io/ggerganov/llama.cpp:full
+    container_name: llama-server
+    command: >
+      --server
+      -m ${MODEL_FILE}
+      -c 1024
+      -n 256
+      --host 0.0.0.0
+      --port 8080
+    volumes:
+      - ./models:/models
+    ports:
+      - "8080:8080"
+
+  bot:
+    build: ./bot
+    container_name: wp-auto-bot
+    env_file: .env         # ← ここで BOT 側にも同じ .env を渡す
+    depends_on:
+      - llama
+    working_dir: /app
+    command: ["python", "main.py"]

@@ -1,0 +1,18 @@
+version: "3.9"
+
+services:
+  wp:
+    build: ./bot
+    env_file:
+      - .env
+    command: ["python", "main_wp.py"]
+    volumes:
+      - ./secrets:/secrets
+
+  ig:
+    build: ./bot
+    env_file:
+      - .env
+    command: ["python", "main_ig.py"]
+    volumes:
+      - ./secrets:/secrets

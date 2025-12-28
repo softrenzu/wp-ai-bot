@@ -1,0 +1,363 @@
+import os
+import re
+import time
+import unicodedata
+from typing import Optional
+
+import requests
+
+from templates import get_static_templates_text
+from local_news import LocalNewsFetcher
+from past_titles_db import (
+    init_db,
+    add_title,
+    find_similar_titles,
+    fetch_recent_titles,
+)
+
+# ===================== 基本設定 =====================
+
+WP_BASE_URL = os.environ.get("WP_URL")
+WP_USER = os.environ.get("WP_USER")
+WP_APP_PASSWORD = os.environ.get("WP_APP_PASSWORD")
+
+LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "http://llama:8080")
+MODEL_FILE = os.environ.get("MODEL_FILE", "/models/model.gguf")
+
+TOPIC = os.environ.get("TOPIC", "").strip()
+WP_POST_STATUS = os.environ.get("WP_POST_STATUS", "draft")  # publish にしておくと即公開
+
+if not WP_BASE_URL:
+    raise RuntimeError("WP_URL is not set in environment")
+
+WP_POSTS_URL = WP_BASE_URL.rstrip("/") + "/wp-json/wp/v2/posts"
+LLM_COMPLETIONS_URL = LLM_BASE_URL.rstrip("/") + "/v1/completions"
+
+
+# ===================== ユーティリティ =====================
+
+def slugify(text: str) -> str:
+    """
+    タイトルから英語スラッグを生成（パーマリンクを日本語にしないため）
+    """
+    text = unicodedata.normalize("NFKD", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-zA-Z0-9\- ]+", "", text)
+    text = text.lower().strip().replace(" ", "-")
+    text = re.sub(r"-+", "-", text)
+    return text or "post"
+
+
+def call_llm(
+    prompt: str,
+    max_tokens: int = 1024,
+    temperature: float = 0.7,
+    stop=None,
+) -> str:
+    """
+    - timeout は指定せず「返ってくるまで待つ」
+    - 503（Service Unavailable）はモデル準備中とみなして粘り強くリトライ
+    """
+    if stop is None:
+        stop = ["</s>"]
+
+    payload = {
+        "model": MODEL_FILE,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "stop": stop,
+    }
+
+    last_error: Optional[Exception] = None
+
+    for i in range(30):
+        try:
+            resp = requests.post(
+                LLM_COMPLETIONS_URL,
+                json=payload,
+            )
+
+            # 503 は特別扱いして待つ
+            if resp.status_code == 503:
+                print(f"[call_llm] 503 from LLM (attempt {i+1}/30). wait 10s...")
+                time.sleep(10)
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+
+            if "choices" in data and data["choices"]:
+                text = data["choices"][0].get("text", "")
+            else:
+                text = data.get("text", "")
+
+            return text.strip()
+
+        except Exception as e:
+            last_error = e
+            print(f"[call_llm] error ({i+1}/30): {e}")
+            time.sleep(10)
+
+    raise RuntimeError(f"LLM request failed after retries: {last_error}")
+
+
+# ===================== テーマ生成 =====================
+
+def _is_question_like(title: str) -> bool:
+    patterns = [
+        "を教えてください",
+        "を教えて下さい",
+        "可能か",
+        "できますか",
+        "ください",
+        "下さい",
+        "か？",
+        "か?",
+        "?",
+        "？",
+    ]
+    return any(p in title for p in patterns)
+
+
+def generate_theme(local_news_context: str, static_templates_text: str) -> str:
+    """
+    幡ヶ谷×民泊の「読者向け記事タイトル」を生成。
+    - 質問文・指示文・『提案されたタイトル』系は弾く
+    - 30文字前後に収める
+    """
+    recent = fetch_recent_titles()
+    past_titles_text = "\n".join(f"- {title}" for _, title in recent)
+
+    base_prompt = f"""
+あなたは「渋谷区・幡ヶ谷エリア」専門の民泊集客コンサルタント兼
+ローカルメディア編集長です。
+
+目的：
+- 幡ヶ谷エリアの民泊に泊まりに来るお客様を集客するための
+  「読者にそのまま見せるブログ記事タイトル」を1つだけ考えること
+
+必ず守る条件：
+- 毎日1本ずつ数年投稿してもネタが尽きないように、切り口を変える
+- 必ず「幡ヶ谷」または「渋谷区」を含める
+- 民泊・宿泊に関係する内容にする
+- 「〜とは？」「〜を教えてください」「〜が可能か？」など
+  質問文・依頼文の形にしない
+- 「提案」「タイトル案」「問題」など、AIへの指示語を入れない
+- 旅行者や民泊ゲストが検索しそうなキーワードを含める
+- 30文字前後（28〜34文字）の日本語タイトルを1つだけ出力する
+- 箇条書き・番号・コメントは禁止。タイトル文字列1行のみを返す。
+
+今日のローカル情報：
+{local_news_context}
+
+幡ヶ谷 × 民泊のテーマの型（一例）：
+{static_templates_text}
+
+過去に投稿済みのタイトル（一部）：
+{past_titles_text}
+
+上記を踏まえ、
+幡ヶ谷エリアの民泊集客に役立つ新しい視点の
+「自然な日本語のブログ記事タイトル」を1つだけ提案してください。
+    """.strip()
+
+    last_candidate = None
+
+    for attempt in range(5):
+        if attempt == 0:
+            prompt = base_prompt
+        else:
+            prompt = base_prompt + f"""
+
+前回の候補タイトル：
+- {last_candidate}
+
+これは既存タイトルと似ている、または
+質問文・指示文のようで読者向けではないと判断されたため、
+これとは異なる自然な記事タイトルを
+1つだけ再提案してください。
+            """.strip()
+
+        raw = call_llm(prompt, max_tokens=128, temperature=0.7)
+        first_line = raw.splitlines()[0].strip()
+        candidate = first_line.lstrip("0123456789. 　-・「」『』[]【】")
+
+        # 不要フレーズ除去
+        bad_phrases = [
+            "提案されたタイトルを含めた",
+            "提案されたタイトルは、",
+            "提案されたタイトルは",
+            "タイトル案：",
+            "タイトル：",
+            "新しい切り口：",
+            "問題：",
+            "問題",
+        ]
+        for bad in bad_phrases:
+            candidate = candidate.replace(bad, "")
+
+        candidate = candidate.strip(" 　:：-、。")
+
+        # 質問文っぽいものは却下
+        if _is_question_like(candidate):
+            print(f"[THEME] rejected question-like candidate: {candidate}")
+            last_candidate = candidate or last_candidate
+            continue
+
+        # 必須ワード補正
+        if "幡ヶ谷" not in candidate and "渋谷区" not in candidate:
+            candidate = f"幡ヶ谷で楽しむ {candidate}"
+        if "民泊" not in candidate and "宿泊" not in candidate:
+            candidate = candidate + " 民泊宿泊ガイド"
+
+        # 長さ調整（32文字で切る）
+        if len(candidate) > 32:
+            candidate = candidate[:32]
+
+        similar = find_similar_titles(candidate)
+        if not similar:
+            return candidate
+
+        print(f"[THEME] similar detected (attempt {attempt+1}): {candidate}")
+        print(f"[THEME] similar to: {similar[:3]}")
+        last_candidate = candidate
+
+    return last_candidate or "幡ヶ谷民泊の集客ブログタイトル自動生成"
+
+
+# ===================== 記事生成 =====================
+
+def _postprocess_body(text: str) -> str:
+    """
+    - 「▼問題」「問題」などの行を削除
+    - 箇条書き（- * ・で始まる行）を削除
+    - 最後が句点などで終わらなければ「。」を足す
+    """
+    lines = text.splitlines()
+    new_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped:
+            new_lines.append("")  # 空行はそのまま
+            continue
+
+        # 問題・指示系の行を削除
+        if stripped.startswith("▼問題") or stripped.startswith("問題") or stripped.startswith("【問題】"):
+            continue
+
+        # 箇条書き（アスタリスク/ハイフン/中黒）を削除
+        if re.match(r"^[-*・]\s", stripped):
+            continue
+
+        new_lines.append(line)
+
+    out = "\n".join(new_lines).strip()
+
+    if out and out[-1] not in "。.!?！？）)」』\"'":
+        out += "。"
+
+    return out
+
+
+def generate_article(theme: str) -> tuple[str, str]:
+    """
+    テーマに対して、Q&Aではなく「ブログ記事本文」を生成する。
+    - 冒頭に「はい、〜です。」と書かせない
+    - 箇条書きは使わせない（見出し + 段落のみ）
+    """
+    prompt = f"""
+あなたは民泊運営と旅行者ニーズに精通した日本語ライターです。
+
+次のテーマで、渋谷区幡ヶ谷エリアの民泊に泊まりたい読者向けに
+ブログ記事の本文のみを書いてください。
+
+【テーマ】
+{theme}
+
+# 絶対に守るルール
+- タイトルは本文に含めない（WordPress で別途設定する）
+- 「問題」「以下に書くこと」などのメタ説明や指示文は書かない
+- 「はい、〜です。」など質問への回答のような書き出しにしない
+- 箇条書き（- や * や ・で始まるリスト）は一切使わない
+- 構成は「導入 → 見出し付き本文（## 見出しを3つ）→ まとめ」
+- 見出し以外の行は、普通の文章の段落で書く
+- です・ます調で、親しみやすく丁寧な文体
+- 文字数はおよそ 1200〜1600 文字
+- 幡ヶ谷エリアの魅力・アクセス・周辺の飲食店や観光などを
+  できるだけ具体的にイメージしやすく書く
+- 不安解消（治安・移動・買い物・言葉の問題など）につながる
+  情報を含める
+- 特定の物件名や広告的な表現は避け、一般的な民泊を想定して書く
+
+# 出力形式
+- 本文のみを出力すること
+- 先頭行は導入の本文から始める（タイトルや「問題:」は書かない）
+- Markdown の見出しは「## 見出しタイトル」のみ使用する
+- コードブロックや余計な説明文は付けない
+    """.strip()
+
+    body_raw = call_llm(prompt, max_tokens=800, temperature=0.8)
+    body = _postprocess_body(body_raw)
+    return theme, body
+
+
+# ===================== WordPress 投稿 =====================
+
+def post_to_wordpress(title: str, content: str, status: str = "draft"):
+    slug = slugify(title)
+
+    data = {
+        "title": title,
+        "content": content,
+        "status": status,
+        "slug": slug,
+    }
+    print(f"[WP] Posting: title={title!r}, slug={slug!r}, status={status}")
+    resp = requests.post(
+        WP_POSTS_URL,
+        json=data,
+        auth=(WP_USER, WP_APP_PASSWORD),
+    )
+    if not resp.ok:
+        print("[WP] Error:", resp.status_code, resp.text)
+        resp.raise_for_status()
+    else:
+        try:
+            link = resp.json().get("link")
+        except Exception:
+            link = None
+        print("[WP] Success:", resp.status_code, link)
+
+
+# ===================== メイン処理 =====================
+
+def run_once():
+    init_db()
+
+    if TOPIC:
+        theme = TOPIC
+        print(f"[THEME] Using fixed TOPIC from .env: {theme}")
+    else:
+        fetcher = LocalNewsFetcher()
+        local_news_context = fetcher.build_local_news_context()
+        static_templates_text = get_static_templates_text()
+        theme = generate_theme(local_news_context, static_templates_text)
+        print(f"[THEME] Generated theme: {theme}")
+
+    title, content = generate_article(theme)
+    print(f"[ARTICLE] Generated article length: {len(content)} characters")
+
+    post_to_wordpress(title, content, status=WP_POST_STATUS)
+    add_title(title)
+    print("[DB] Title stored")
+
+
+def main():
+    run_once()
+
+
+if __name__ == "__main__":
+    main()

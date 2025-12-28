@@ -1,0 +1,16 @@
+Creating wp-ai-bot_wp_run ... 
+Creating wp-ai-bot_wp_run ... done
+Traceback (most recent call last):
+  File "/app/main_wp.py", line 1, in <module>
+    from main import run_once
+  File "/app/main.py", line 8, in <module>
+    from image_featured import attach_featured_image_from_drive
+  File "/app/image_featured.py", line 28, in <module>
+    raise RuntimeError("GDRIVE_FOLDER_ID / GOOGLE_APPLICATION_CREDENTIALS are required")
+RuntimeError: GDRIVE_FOLDER_ID / GOOGLE_APPLICATION_CREDENTIALS are required
+1
+Creating wp-ai-bot_wp_run ... 
+Creating wp-ai-bot_wp_run ... done
+[DRIVE] picked image: I ZUMIAN_071.jpg (1vg4M2tDu-nvYljSn3JEzLXmz1oeC6FvW)
+[WP-MEDIA] Uploaded image id=394, url=https://staytokyo.xyz/wp-content/uploads/2025/12/featured_393.jpg
+[WP-POST] featured_media set. post_id=393, media_id=394

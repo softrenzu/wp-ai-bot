@@ -1,0 +1,7 @@
+.env
+models/
+# secrets
+.env
+.env.*
+secrets/
+github-token
