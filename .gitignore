@@ -5,3 +5,8 @@ models/
 .env.*
 secrets/
 github-token
+# secrets
+.env
+.env.*
+secrets/
+github-token
