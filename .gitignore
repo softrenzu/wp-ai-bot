@@ -1,12 +1,14 @@
 .env
+secrets/
+logs/
+__pycache__/
+*.pyc
+*.db
+*.bak
+
+.env*
+github-token
 models/
-# secrets
-.env
-.env.*
-secrets/
-github-token
-# secrets
-.env
-.env.*
-secrets/
-github-token
+tiktok.log
+tiktok-bot/*.log
+instagram_reels/

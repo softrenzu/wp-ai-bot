@@ -16,3 +16,13 @@ services:
     command: ["python", "main_ig.py"]
     volumes:
       - ./secrets:/secrets
+
+  threads:
+    build: .
+    working_dir: /app/bot
+    command: python3 threads_post.py
+    env_file:
+      - .env
+    volumes:
+      - ./:/app
+
