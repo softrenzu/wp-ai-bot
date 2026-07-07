@@ -12,3 +12,14 @@ models/
 tiktok.log
 tiktok-bot/*.log
 instagram_reels/
+
+# additional runtime / secret folders
+keys/
+backups/
+cron.log
+*.key
+*.pem
+*.crt
+*.p12
+*.sqlite
+*.sqlite3
