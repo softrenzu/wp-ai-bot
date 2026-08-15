@@ -1,0 +1,16 @@
+# DIRECT_BOOKING_SEO_V1
+# WordPress direct-booking SEO automation
+
+# Search Console SEO analysis: Monday 07:30
+30 7 * * 1 cd /home/ubuntu/wp-ai-bot && /usr/bin/flock -n /tmp/wp-ai-feedback.lock /usr/bin/docker-compose run --rm wp python seo_strategy.py >> /home/ubuntu/wp-ai-bot/logs/seo_strategy_weekly.log 2>&1
+
+# Keyword research: Monday 07:45
+45 7 * * 1 cd /home/ubuntu/wp-ai-bot && /usr/bin/flock -n /tmp/wp-ai-keyword.lock /usr/bin/docker-compose run --rm wp python keyword_bootstrap.py >> /home/ubuntu/wp-ai-bot/logs/keyword_bootstrap_weekly.log 2>&1
+
+# Every day 08:00:
+# New post on Monday/Friday.
+# Other days refresh existing posts.
+0 8 * * * cd /home/ubuntu/wp-ai-bot && /usr/bin/flock -n /tmp/wp-ai-post.lock /usr/bin/docker-compose run --rm wp python conversion_guard.py >> /home/ubuntu/wp-ai-bot/logs/wp_conversion.log 2>&1
+
+# Every day 08:20: sitemap/indexing/Search Console monitoring
+20 8 * * * cd /home/ubuntu/wp-ai-bot && /usr/bin/flock -n /tmp/wp-ai-indexing.lock /usr/bin/docker-compose run --rm wp python indexing_pipeline.py --max-urls 25 >> /home/ubuntu/wp-ai-bot/logs/indexing_pipeline.log 2>&1
