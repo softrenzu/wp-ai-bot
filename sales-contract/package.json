@@ -1,0 +1,22 @@
+{
+  "name": "jo-ai-sales-contract",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "On-site quotation, agreement signing and Stripe subscription checkout",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "pg": "^8.13.1",
+    "stripe": "^17.5.0"
+  }
+}
