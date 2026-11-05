@@ -4,6 +4,7 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import pg from "pg";
 import Stripe from "stripe";
+import QRCode from "qrcode";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { makeAgreement, makeToken, quoteNumber, sha256, yen, MONTHLY_PRICE, TAX_AMOUNT, TOTAL } from "./lib.js";
 
@@ -162,7 +163,7 @@ app.get("/o/:token",async (req,res)=>{
    </form>`}
   </section></div>
   <section class="panel payment"><div><div class="eyebrow">PAYMENT</div><h2>クレジットカードでお申し込み</h2>
-  <p>月額16,500円（税込）をカードで継続決済します。カード情報の入力はStripeの安全な決済画面で行います。</p><p class="muted">OpenAI APIの利用料は別契約・別課金です。</p></div>
+  <p>月額16,500円（税込）をカードで継続決済します。カード情報の入力はStripeの安全な決済画面で行います。</p><p class="muted">OpenAI APIの利用料は別契約・別課金です。<a href="https://platform.openai.com/settings/organization/billing/overview" target="_blank" rel="noopener">OpenAI公式のAPI支払い設定</a></p></div>
   <div>${paid ? `<p class="success">お支払いを確認しました</p>` : `<button class="primary" id="checkout-button" data-token="${h(t)}" ${signed?"":"disabled"}>カード登録・決済へ進む</button>`}
   <p role="status" id="checkout-message"></p></div></section>
   <section class="panel"><h2>書類を受け取る</h2><div class="docs">
@@ -171,6 +172,15 @@ app.get("/o/:token",async (req,res)=>{
   ${o.stripe_receipt_url ? `<a href="/o/${h(t)}/receipt" target="_blank" rel="noopener">領収書（Stripe発行）</a>` : "<span>領収書：決済後に発行</span>"}
   </div></section>
 </main><script src="/app.js" defer></script>`+footer);
+});
+
+app.get("/o/:token/qr.svg",async (req,res)=>{
+  const offer=await fetchOffer(req.params.token);
+  if(!offer) return res.status(404).end();
+  const url=`${baseUrl}/o/${req.params.token}`;
+  const qr=await QRCode.toString(url,{type:"svg",width:260,margin:2,errorCorrectionLevel:"M"});
+  res.set("Cache-Control","private, no-store");
+  res.type("image/svg+xml").send(qr);
 });
 
 app.post("/api/offers/:token/sign",async (req,res)=>{
