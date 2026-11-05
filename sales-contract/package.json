@@ -17,6 +17,7 @@
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
     "pg": "^8.13.1",
+    "qrcode": "^1.5.4",
     "stripe": "^17.5.0"
   }
 }
