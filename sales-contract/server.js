@@ -62,9 +62,26 @@ app.post("/webhooks/stripe", express.raw({type:"application/json"}), async (req,
           await client.query("UPDATE offers SET status=$2,paid_at=CASE WHEN $2='paid' THEN NOW() ELSE paid_at END,stripe_subscription_id=COALESCE($3,stripe_subscription_id),stripe_customer_id=COALESCE($4,stripe_customer_id),stripe_invoice_url=COALESCE($5,stripe_invoice_url) WHERE id=$1 AND signed_at IS NOT NULL",
           [offerId,event.type==="invoice.paid"?"paid":"past_due",subId,obj.customer || null,obj.hosted_invoice_url || null]);
         }
-      } else if(event.type === "charge.succeeded" && obj.customer && obj.receipt_url) {
-        await client.query("UPDATE offers SET stripe_receipt_url=$2 WHERE stripe_customer_id=$1 AND signed_at IS NOT NULL",
-          [obj.customer,obj.receipt_url]);
+      } else if(event.type === "charge.succeeded" && obj.receipt_url) {
+        // A charge event may arrive before checkout.session.completed.
+        // Locate the offer through the subscription's metadata first.
+        let offerId=null;
+        const invoiceId=typeof obj.invoice==="string"?obj.invoice:obj.invoice?.id;
+        if(invoiceId) {
+          const invoice=await stripe.invoices.retrieve(invoiceId);
+          const subId=invoice.subscription || invoice.parent?.subscription_details?.subscription;
+          if(subId) {
+            const sub=await stripe.subscriptions.retrieve(subId);
+            offerId=sub.metadata?.offer_id || null;
+          }
+        }
+        if(offerId) {
+          await client.query("UPDATE offers SET stripe_receipt_url=$2,stripe_customer_id=COALESCE($3,stripe_customer_id) WHERE id=$1 AND signed_at IS NOT NULL",
+            [offerId,obj.receipt_url,obj.customer || null]);
+        } else if(obj.customer) {
+          await client.query("UPDATE offers SET stripe_receipt_url=$2 WHERE stripe_customer_id=$1 AND signed_at IS NOT NULL",
+            [obj.customer,obj.receipt_url]);
+        }
       } else if(event.type === "customer.subscription.deleted") {
         await client.query("UPDATE offers SET status='cancelled' WHERE stripe_subscription_id=$1",[obj.id]);
       }
