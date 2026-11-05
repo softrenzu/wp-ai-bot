@@ -13,7 +13,7 @@
       const j=await r.json();
       if(!r.ok) throw Error(j.error||"作成に失敗しました");
       const a=document.createElement("a");a.href=j.url;a.textContent="商談用URLを開く（"+j.quoteNumber+"）";a.rel="noopener";a.target="_blank";
-      msg.textContent="";msg.append("作成済み：",a);
+      msg.textContent="";const qr=document.createElement("img");qr.src=j.url+"/qr.svg";qr.alt="顧客が読み取るための商談URLのQRコード";qr.className="qr";msg.append("作成済み：",a,document.createElement("br"),qr);
       admin.elements.adminToken.value="";
     } catch(e) {show(msg,e.message);} finally {btn.disabled=false;}
   });
