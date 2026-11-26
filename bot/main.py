@@ -228,7 +228,7 @@ def call_chatgpt(prompt: str, max_tokens: int = 1024, temperature: float = 0.7) 
         except Exception as e:
             print(f"[ERROR] {e}")
             break
-    return "渋谷の古民家民泊「泉庵」で過ごす、本物の東京滞在"
+    raise RuntimeError("OpenAI API request failed")
 
 
 def clean_markdown_residue(content: str) -> str:
@@ -350,8 +350,7 @@ Output only the English HTML body. Do not include <html> or <body> tags. Do not 
         print(f"[RETRY] Article regeneration attempt {attempt + 1}")
         prompt += "\n\nThe previous output failed validation. Use HTML only, do not use Markdown, and include the booking CTA exactly."
 
-    print("[WARN] Article failed validation 3 times. Using the last generated result.")
-    return article
+    raise RuntimeError("Article validation failed. Posting cancelled.")
 
 def post_to_wordpress(title: str, content: str) -> Optional[dict]:
     slug = slugify(title)
